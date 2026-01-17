@@ -3,7 +3,8 @@ livekit>=0.17.0
 livekit-agents>=0.12.0
 
 # --- LiveKit Plugins (AI Models) ---
-livekit-plugins-openai         # LLM (GPT-4o) & STT (Whisper)
+# livekit-plugins-openai         # LLM (GPT-4o) & STT (Whisper) -> Replaced by Gemini
+google-generativeai
 livekit-plugins-elevenlabs     # TTS (목소리)
 livekit-plugins-silero         # VAD (말 끊김 감지)
 

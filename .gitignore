@@ -32,3 +32,6 @@ logs/
 build/
 dist/
 *.spec
+
+# 음성 파일
+*.wav
