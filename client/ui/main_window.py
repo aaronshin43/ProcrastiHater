@@ -3,8 +3,8 @@ import os
 from PyQt6.QtWidgets import (QApplication, QWidget, QLabel, QGridLayout, 
                              QVBoxLayout, QFrame, QMainWindow)
 from PyQt6.QtCore import Qt, pyqtSignal
-from name import personality_cards
-import name
+from client.ui.name import personality_cards
+import client.ui.name as name
 
 class PersonalityCard(QFrame):
     # 클릭 이벤트를 부모에게 알리기 위한 시그널

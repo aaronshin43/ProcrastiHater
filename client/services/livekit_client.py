@@ -68,7 +68,8 @@ class LiveKitClient(QObject):
                 data = packet.to_json().encode('utf-8')
                 await self.room.local_participant.publish_data(
                     data,
-                    topic="detection"
+                    topic="detection",
+                    reliable=True
                 )
         except Exception as e:
             print(f"Error sending packet: {e}")
@@ -77,39 +78,47 @@ class LiveKitClient(QObject):
     async def _connect_async(self):
         """비동기 연결 로직"""
         try:
+            print("🔑 Generating token...")
             # Access Token 생성
             token = Config.get_livekit_token()
             
-            # Room 생성 및 연결
+            # Room 생성
             self.room = rtc.Room()
             
             # 이벤트 핸들러
             @self.room.on("connected")
             def on_connected():
-                print("✅ LiveKit에 연결되었습니다")
-                self._connected = True
-                self.connected_signal.emit()
+                print("✅ Event: LiveKit에 연결되었습니다")
             
             @self.room.on("disconnected")
             def on_disconnected():
-                print("❌ LiveKit 연결이 끊어졌습니다")
+                print("❌ Event: LiveKit 연결이 끊어졌습니다")
                 self._connected = False
                 self.disconnected_signal.emit()
             
             # 연결
+            print(f"🔗 Connecting to Room: {Config.LIVEKIT_URL}")
             await self.room.connect(
                 Config.LIVEKIT_URL,
                 token
             )
             
-            # 이벤트 루프 유지
-            await asyncio.sleep(3600)  # 1시간 대기 (실제로는 무한 루프)
+            # 연결 완료 처리 (이벤트 리스너에만 의존하지 않고 명시적으로 처리)
+            print("✅ Connection established! (Async await finished)")
+            self._connected = True
+            self.connected_signal.emit()
+            
+            # 무한 대기로 이벤트 루프 유지
+            stop_event = asyncio.Event()
+            await stop_event.wait()
             
         except Exception as e:
-            print(f"LiveKit 연결 오류: {e}")
+            print(f"❌ LiveKit 연결 오류 상세: {e}")
+            import traceback
+            traceback.print_exc()
             self.error_signal.emit(str(e))
             self._connected = False
-    
+
     def is_connected(self) -> bool:
         """연결 상태 확인"""
         return self._connected
@@ -125,6 +134,7 @@ class LiveKitThread(QThread):
     
     def run(self):
         """스레드 실행 - asyncio 이벤트 루프 시작"""
+        print("🧵 LiveKitThread started")
         self._running = True
         self.client._loop = asyncio.new_event_loop()
         asyncio.set_event_loop(self.client._loop)
@@ -132,8 +142,9 @@ class LiveKitThread(QThread):
         try:
             self.client._loop.run_until_complete(self.client._connect_async())
         except Exception as e:
-            print(f"LiveKit thread error: {e}")
+            print(f"❌ LiveKit thread crash: {e}")
         finally:
+            print("⏹️ LiveKit loop closing")
             self.client._loop.close()
             self.client._loop = None
     
