@@ -54,6 +54,29 @@ class VisionWorker(QThread):
             print("💡 모델 파일을 다운로드하거나 다른 방법을 시도해주세요.")
             raise
         
+        # MediaPipe Object Detector 초기화 (휴대폰 감지용)
+        object_model_path = os.path.join(os.path.dirname(__file__), 'efficientdet_lite0.tflite')
+        
+        if os.path.exists(object_model_path):
+            try:
+                object_base_options = python.BaseOptions(model_asset_path=object_model_path)
+                object_options = vision.ObjectDetectorOptions(
+                    base_options=object_base_options,
+                    max_results=5,  # 최대 5개 객체 감지
+                    score_threshold=0.5,  # 최소 신뢰도 50%
+                    category_allowlist=["cell phone"]  # 휴대폰만 감지
+                )
+                self.object_detector = vision.ObjectDetector.create_from_options(object_options)
+                print("[OK] Object Detector 초기화 완료 (휴대폰 감지 활성화)")
+            except Exception as e:
+                print(f"⚠️ Object Detector 초기화 실패: {e}")
+                print("💡 휴대폰 감지 기능이 비활성화됩니다. 모델을 다운로드하세요: python download_object_detector_model.py")
+                self.object_detector = None
+        else:
+            print(f"⚠️ Object Detector 모델 파일을 찾을 수 없습니다: {object_model_path}")
+            print("💡 휴대폰 감지 기능이 비활성화됩니다. 모델을 다운로드하세요: python download_object_detector_model.py")
+            self.object_detector = None
+        
         # 상태 추적 (카운터 방식)
         self.eye_closed_counter = 0  # 눈 감음 연속 프레임 카운터
         self.no_face_counter = 0  # 얼굴 부재 연속 프레임 카운터
@@ -69,6 +92,9 @@ class VisionWorker(QThread):
         self.GAZE_PITCH_THRESHOLD = 25.0  # 위/아래 시선 벗어남 임계값 (도)
         self.GAZE_YAW_THRESHOLD = 30.0  # 좌/우 시선 벗어남 임계값 (도)
         self.GAZE_AWAY_CONSECUTIVE_FRAMES = 100  # 연속 프레임 수 (시선 벗어남 감지 임계값, 약 50초)
+        
+        # 휴대폰 감지 임계값
+        self.PHONE_SCORE_THRESHOLD = 0.5  # 휴대폰 감지 최소 신뢰도
         
         # 얼굴 방향 계산용 추가 랜드마크
         self.LEFT_EYE_INNER = 133
@@ -277,7 +303,7 @@ class VisionWorker(QThread):
         
         return pitch_degrees, yaw_degrees
     
-    def draw_debug_info(self, frame, face_landmarks, avg_ear, pitch, yaw, is_sleeping, is_absent, is_gaze_away):
+    def draw_debug_info(self, frame, face_landmarks, avg_ear, pitch, yaw, is_sleeping, is_absent, is_gaze_away, is_phone_detected=False, object_result=None):
         """디버그 정보를 프레임에 그리기"""
         frame_height, frame_width = frame.shape[:2]
         
@@ -402,6 +428,39 @@ class VisionWorker(QThread):
                        (10, y_offset), font, font_scale, (255, 255, 255), thickness)
             y_offset += 25
         
+        # 휴대폰 감지 상태 표시
+        if hasattr(self, 'object_detector') and self.object_detector:
+            phone_status = "DETECTED" if is_phone_detected else "NOT DETECTED"
+            phone_status_color = (0, 0, 255) if is_phone_detected else (128, 128, 128)
+            cv2.putText(frame, f"Phone: {phone_status}", (10, y_offset),
+                       font, font_scale, phone_status_color, thickness)
+            y_offset += 25
+        else:
+            cv2.putText(frame, "Phone: DISABLED (model not found)", (10, y_offset),
+                       font, font_scale * 0.8, (128, 128, 128), 1)
+            y_offset += 20
+        
+        # Object Detection 바운딩 박스 그리기 (휴대폰)
+        if object_result and object_result.detections:
+            for detection in object_result.detections:
+                for category in detection.categories:
+                    if category.category_name == "cell phone" and category.score >= self.PHONE_SCORE_THRESHOLD:
+                        # 바운딩 박스 좌표 추출
+                        bbox = detection.bounding_box
+                        x = int(bbox.origin_x)
+                        y = int(bbox.origin_y)
+                        w = int(bbox.width)
+                        h = int(bbox.height)
+                        
+                        # 바운딩 박스 그리기 (빨간색)
+                        box_color = (0, 0, 255) if is_phone_detected else (0, 165, 255)
+                        cv2.rectangle(frame, (x, y), (x + w, y + h), box_color, 2)
+                        
+                        # 라벨과 신뢰도 표시
+                        label = f"Phone: {category.score:.2f}"
+                        cv2.putText(frame, label, (x, y - 10), font, 0.5, box_color, 2)
+                        break
+        
         # 상태 표시 (항상 표시)
         if is_sleeping:
             cv2.putText(frame, "SLEEPING!", (10, y_offset),
@@ -414,6 +473,10 @@ class VisionWorker(QThread):
         if is_gaze_away:
             cv2.putText(frame, "GAZE AWAY!", (10, y_offset),
                        font, 0.8, (0, 165, 255), 2)
+            y_offset += 30
+        if is_phone_detected:
+            cv2.putText(frame, "PHONE DETECTED!", (10, y_offset),
+                       font, 0.8, (0, 0, 255), 2)
             y_offset += 30
         
         return frame
@@ -441,11 +504,37 @@ class VisionWorker(QThread):
                     mp_image = MPImage(image_format=ImageFormat.SRGB, data=frame_rgb)
                     detection_result = self.face_landmarker.detect(mp_image)
                     
+                    # 변수 초기화
                     is_sleeping = False
                     is_absent = False
                     is_gaze_away = False
+                    is_phone_detected = False
                     avg_ear = 0.0  # 기본값
                     pitch, yaw = 0.0, 0.0  # 얼굴 방향 (각도, 도 단위)
+                    object_result = None  # Object Detection 결과
+                    
+                    # MediaPipe Object Detection 처리 (휴대폰 감지)
+                    if self.object_detector:
+                        try:
+                            object_result = self.object_detector.detect(mp_image)
+                            
+                            # 휴대폰 감지 확인 (발견하는 순간 바로 이벤트 발생)
+                            phone_detected = False
+                            if object_result.detections:
+                                for detection in object_result.detections:
+                                    # 카테고리가 "cell phone"이고 신뢰도가 임계값 이상인지 확인
+                                    for category in detection.categories:
+                                        if category.category_name == "cell phone" and category.score >= self.PHONE_SCORE_THRESHOLD:
+                                            phone_detected = True
+                                            break
+                                    if phone_detected:
+                                        break
+                            
+                            # 발견하는 순간 바로 이벤트 발생
+                            is_phone_detected = phone_detected
+                        except Exception as e:
+                            print(f"[WARNING] Object Detection 오류: {e}")
+                            object_result = None
                     
                     if detection_result.face_landmarks:
                         # 얼굴이 감지됨 - 얼굴 부재 카운터 리셋
@@ -533,6 +622,19 @@ class VisionWorker(QThread):
                             )
                             self.alert_signal.emit(packet)
                     
+                    # 휴대폰 감지 시 Packet 발송 (발견하는 순간 바로 발송, 중복 방지용 쿨다운 적용)
+                    if is_phone_detected:
+                        if self.should_alert(VisionEvents.PHONE_DETECTED):
+                            packet = Packet(
+                                event=VisionEvents.PHONE_DETECTED,
+                                data={
+                                    "confidence": 0.9,
+                                    "detected": True
+                                },
+                                meta=PacketMeta(category=PacketCategory.VISION)
+                            )
+                            self.alert_signal.emit(packet)
+                    
                     # 디버그 창 표시 (얼굴이 있든 없든 항상 표시)
                     if self.show_debug_window:
                         # 얼굴 랜드마크 추출
@@ -543,7 +645,8 @@ class VisionWorker(QThread):
                         debug_frame = self.draw_debug_info(
                             frame.copy(), 
                             face_landmarks_for_draw,
-                            avg_ear, pitch, yaw, is_sleeping, is_absent, is_gaze_away
+                            avg_ear, pitch, yaw, is_sleeping, is_absent, is_gaze_away,
+                            is_phone_detected, object_result
                         )
                         cv2.imshow('Vision Debug', debug_frame)
                         # 'q' 키를 누르면 종료
