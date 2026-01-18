@@ -303,6 +303,19 @@ class LiveKitClient(QObject):
         self._paused = paused
         status = "Paused" if paused else "Resumed"
         print(f"⏸️ LiveKit Client is now {status}")
+        
+        # Resume 시 버퍼링된 중요 패킷(성격 등)이 있다면 즉시 전송
+        if not paused and self._connected:
+            if self._pending_personality_packet:
+                print(f"🚀 Sending Buffered Personality (On Resume): {self._pending_personality_packet.data.get('personality')}")
+                if self._worker.loop and self._worker.loop.is_running():
+                    asyncio.run_coroutine_threadsafe(
+                        self._send_packet_async(self._pending_personality_packet),
+                        self._worker.loop
+                    )
+                # 전송 후 clear? 아니면 계속 유지? 
+                # (일반적으로 clear가 맞지만, 재연결 시 또 쓰일 수 있음. 일단 유지 or clear. 여기선 clear 하지 않음)
+
 
     def is_paused(self) -> bool:
         return self._paused
@@ -314,7 +327,7 @@ class LiveKitClient(QObject):
     def send_packet(self, packet: Packet):
         # 성격 변경 패킷은 연결 여부와 상관없이 항상 최신 상태를 저장 (버퍼링)
         if packet.event == SystemEvents.PERSONALITY_UPDATE:
-            print(f"📦 Buffering Personality: {packet.data.get('personality')}")
+            print(f"📦 Buffering Personality (Always): {packet.data.get('personality')}")
             self._pending_personality_packet = packet
         elif packet.event == SystemEvents.SESSION_START:
              print(f"📦 Buffering Session Start Event")
@@ -329,7 +342,16 @@ class LiveKitClient(QObject):
             print(f"⚠️ Packet dropped (No Room Object): {packet.event}")
             return
             
+        # Paused 상태여도 SYSTEM/Personality 패킷은 버퍼링된 것을 나중에 보낼 수 있게 통과시키거나
+        # 여기서는 즉시 전송하지 않고 drop 하되, Unpause 시점에 _pending_personality_packet을 확인해서 보내야 함.
+        # 하지만 현재 로직 상 _pending_packet은 'Connect' 시점에만 전송됨.
+        # 따라서 Pause -> Unpause 시점에도 버퍼링된 패킷 전송 로직이 필요함.
         if self._paused:
+            # 설정 패킷이면 버퍼링은 이미 위에서 했으므로, 로그만 남기고 리턴
+            if packet.event == SystemEvents.PERSONALITY_UPDATE:
+                print(f"⚠️ Packet deferred (Paused): {packet.event}")
+                return
+            
             print(f"⚠️ Packet dropped (Paused): {packet.event}")
             return
         

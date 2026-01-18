@@ -46,17 +46,17 @@ class GlobalKeyManager(QObject):
         # keyboard listeners run in a separate thread, so we accept that.
         # pyqtSignals are thread-safe when emitted from other threads.
         try:
-            keyboard.add_hotkey('alt+a', self._on_session_toggle)
+            # keyboard.add_hotkey('alt+a', self._on_session_toggle)
             keyboard.add_hotkey('alt+b', self._on_debug_toggle)
-            keyboard.add_hotkey('alt+p', self._on_pause_toggle)
+            # keyboard.add_hotkey('alt+p', self._on_pause_toggle)
             keyboard.add_hotkey('alt+s', self._on_mic_toggle)
         except ImportError:
             print("❌ 'keyboard' library not found. Global hotkeys will not work.")
             print("   Please run: pip install keyboard")
 
     def _on_session_toggle(self):
-        print("⌨️ Global Hotkey: Alt+A")
-        self.toggle_session_signal.emit()
+        print("⌨️ Global Hotkey: Alt+A (Disabled)")
+        # self.toggle_session_signal.emit()
 
     def _on_debug_toggle(self):
         print("⌨️ Global Hotkey: Alt+B")
@@ -73,8 +73,8 @@ class GlobalKeyManager(QObject):
         self.toggle_mic_signal.emit()
 
     def _on_pause_toggle(self):
-        print("⌨️ Global Hotkey: Alt+P")
-        self.toggle_pause_signal.emit()
+        print("⌨️ Global Hotkey: Alt+P (Disabled)")
+        # self.toggle_pause_signal.emit()
 
 def main():
     # .env 로드
@@ -112,14 +112,19 @@ def main():
     # Global Key Manager
     key_manager = GlobalKeyManager()
 
+    # Wrapper for conditional stats recording
+    def record_stats_if_active(packet: Packet):
+        if not livekit_client.is_paused():
+            session_stats.record_event(packet)
+
     # 5. 시그널 연결: 서비스 -> UI/네트워크
     # (1-2) VisionWorker 결과 -> SessionStats (통계 저장)
-    vision_worker.alert_signal.connect(session_stats.record_event)
+    vision_worker.alert_signal.connect(record_stats_if_active)
     # (1) VisionWorker 결과 -> LiveKitClient (서버로 데이터 전송)
     vision_worker.alert_signal.connect(livekit_client.send_packet)
     
     # (1.5) ScreenWorker 결과 -> LiveKitClient 및 로그
-    screen_worker.alert_signal.connect(session_stats.record_event)
+    screen_worker.alert_signal.connect(record_stats_if_active)
     screen_worker.alert_signal.connect(livekit_client.send_packet)
     screen_worker.alert_signal.connect(lambda p: print(f"🖥️ Screen Event: {p.event} - {p.data.get('window_title','Unknown')}"))
     
@@ -136,36 +141,32 @@ def main():
     last_toggle_time = 0
     TOGGLE_COOLDOWN = 1.0 # 1초 쿨다운
 
-    def toggle_session():
-        """Key A: 세션 시작/종료 토글"""
+    def start_or_resume_session():
+        """Confirm Button: 세션 시작 또는 설정 변경 후 재개"""
         nonlocal last_toggle_time
         current_time = time.time()
         
         if current_time - last_toggle_time < TOGGLE_COOLDOWN:
             print(f"⏳ Toggle Cooldown (Ignored): {current_time - last_toggle_time:.2f}s")
             return
-        
         last_toggle_time = current_time
 
         if vision_worker.isRunning():
-            print("🛑 Stopping Session triggered by Key A")
-            # 세션 종료 로직
-            # UI 상태 변경 (먼저 변경하여 반응성 확보)
-            floating_widget.hide()
-            debug_window.hide()
-            main_window.show()
+            # 이미 실행 중인 경우 -> 설정 변경 후 재개 (Unpause)
+            print("🔄 Resuming Session (Unpausing)...")
+            if livekit_client.is_paused():
+                livekit_client.set_paused(False)
             
-            # 서비스 종료
-            vision_worker.stop()
-            screen_worker.stop() # ScreenWorker 종료
-            livekit_client.disconnect()
-            
-            session_stats.stop_session()
-            print("📊 Final Stats:", session_stats.get_summary())
-            print("   - Show Main Window, Hide Floating Widget")
+            # UI 상태 변경
+            main_window.hide()
+            floating_widget.show()
+            floating_widget.activateWindow()
+            floating_widget.raise_()
+            print("   - Hide Main Window, Show Floating Widget")
+
         else:
-            print("🚀 Starting Session triggered by Key A")
-            # 세션 시작 로직
+            # 새로 시작하는 경우
+            print("🚀 Starting New Session...")
             # 통계 리셋
             session_stats.reset()
 
@@ -195,6 +196,30 @@ def main():
             floating_widget.raise_()
             print("   - Hide Main Window, Show Floating Widget")
 
+    def stop_session_to_main_menu():
+        """Quit Button: 세션 종료 후 메인 메뉴로 복귀"""
+        print("🛑 Stopping Session -> Main Menu")
+        
+        # UI 상태 변경 (먼저 변경하여 반응성 확보)
+        floating_widget.hide()
+        debug_window.hide()
+        main_window.show()
+        main_window.activateWindow()
+        main_window.raise_()
+        
+        # 서비스 종료
+        if vision_worker.isRunning():
+            vision_worker.stop()
+        if screen_worker.isRunning():
+            screen_worker.stop()
+        
+        if livekit_client.is_connected():
+            livekit_client.disconnect()
+        
+        session_stats.stop_session()
+        print("📊 Final Stats:", session_stats.get_summary())
+        print("   - Show Main Window, Hide Floating Widget")
+
     def toggle_debug_window():
         """Key B: 디버그 윈도우 토글"""
         if debug_window.isVisible():
@@ -220,7 +245,7 @@ def main():
 
     # 모든 창에서 발생한 시그널을 동일한 핸들러에 연결 (어떤 창이 포커스되어 있든 키 동작)
     # Global Key Manager 연결
-    key_manager.toggle_session_signal.connect(toggle_session)
+    # key_manager.toggle_session_signal.connect(toggle_session) # Disabled
     key_manager.toggle_debug_signal.connect(toggle_debug_window)
     key_manager.toggle_pause_signal.connect(toggle_pause)
     key_manager.toggle_mic_signal.connect(livekit_client.toggle_microphone)
@@ -228,30 +253,30 @@ def main():
     # 성격 변경 시그널 연결 (MainWindow -> LiveKitClient)
     main_window.personality_changed_signal.connect(livekit_client.send_packet)
     
-    # MainWindow의 toggle_session_signal 연결 (Personality 화면에서 next 버튼 클릭 시)
-    main_window.toggle_session_signal.connect(toggle_session)
+    # MainWindow의 toggle_session_signal 연결 (Personality 화면에서 confirm 버튼 클릭 시)
+    main_window.toggle_session_signal.connect(start_or_resume_session)
     
     # FloatingWidget 우클릭 메뉴 시그널 연결
     def show_settings():
-        """캐릭터 설정 창 표시"""
+        """캐릭터 설정 창 표시 (일시정지 후)"""
+        if livekit_client.is_connected() and not livekit_client.is_paused():
+            print("⏸️ Pausing Session for Settings...")
+            livekit_client.set_paused(True)
+            
+        floating_widget.hide()
         main_window.show()
         main_window.activateWindow()
         main_window.raise_()
         print("   - Show Settings Window")
     
-    def exit_application():
-        """애플리케이션 종료"""
-        print("🛑 Exit requested from Floating Widget menu")
-        # 세션이 실행 중이면 종료
-        if vision_worker.isRunning():
-            vision_worker.stop()
-            livekit_client.disconnect()
-        # 앱 종료
-        app.quit()
-    
+    # 설정: Pause session -> Open Main Window
     floating_widget.show_settings_signal.connect(show_settings)
+    
+    # 일시정지: Toggle Pause (화면 유지)
     floating_widget.pause_signal.connect(toggle_pause)
-    floating_widget.exit_signal.connect(exit_application)
+    
+    # 종료: 세션 종료 -> 메인 메뉴 (앱 종료 아님)
+    floating_widget.exit_signal.connect(stop_session_to_main_menu)
 
     # Legacy Local Connections (Optional: Keep default A/B in local windoes if desired, 
     # but user requested change to Alt+A/B globally, so we rely on key_manager priority)
