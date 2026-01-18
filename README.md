@@ -76,8 +76,8 @@ ProcrastiHater/
 
 1.  **Clone the repository**
     ```bash
-    git clone https://github.com/yourusername/procrastihator.git
-    cd procrastihator
+    git clone https://github.com/yourusername/procrastihater.git
+    cd procrastihater
     ```
 
 2.  **Install dependencies**
