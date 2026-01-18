@@ -34,6 +34,7 @@ class LiveKitClient(QObject):
     connected_signal = pyqtSignal()
     disconnected_signal = pyqtSignal()
     error_signal = pyqtSignal(str)
+    packet_received_signal = pyqtSignal(object) # 수신 패킷을 UI로 전달
     
     def __init__(self):
         super().__init__()
@@ -98,6 +99,25 @@ class LiveKitClient(QObject):
             print(f"🔗 Connecting to Room: {Config.LIVEKIT_URL}")
             
             # 이벤트 핸들러 설정 (Connect 전)
+            @self.room.on("data_received")
+            def on_data_received(data_packet, participant=None, kind=None, topic=None):
+                try:
+                    payload = data_packet.data if hasattr(data_packet, 'data') else data_packet
+                    if isinstance(payload, bytes):
+                        decoded_str = payload.decode('utf-8')
+                    else:
+                        decoded_str = str(payload)
+                    
+                    packet = Packet.from_json(decoded_str)
+                    print(f"📨 Packet Received from Agent: {packet.event}")
+                    
+                    # 시그널 발생 (메인 스레드에서 처리되도록 QMetaObject 사용 고려 필요하나,
+                    # PyQt Signal은 스레드 안전하므로 직접 emit 가능)
+                    self.packet_received_signal.emit(packet)
+                    
+                except Exception as e:
+                    print(f"Error parsing received packet: {e}")
+
             @self.room.on("connected")
             def on_connected():
                 print("✅ Event: LiveKit에 연결되었습니다")

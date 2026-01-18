@@ -1,7 +1,7 @@
 import sys
 import os
 from PyQt6.QtWidgets import (QApplication, QWidget, QLabel, QGridLayout, 
-                             QVBoxLayout, QHBoxLayout, QFrame, QMainWindow, QPushButton, QScrollArea)
+                             QVBoxLayout, QHBoxLayout, QFrame, QMainWindow, QPushButton, QScrollArea, QStackedLayout)
 from PyQt6.QtCore import Qt, pyqtSignal
 from PyQt6.QtGui import QPainter, QColor, QPen
 from client.ui.name import personality_cards, voice_data, PERSONALITY_PROMPTS
@@ -10,6 +10,8 @@ from client.ui.pipboy_status_bar import PipBoyStatusBar
 from client.ui.pipboy_tab_bar import PipBoyTabBar
 from client.ui.pipboy_list_item import PipBoyListItem
 from client.ui.pipboy_detail_panel import PipBoyDetailPanel
+from client.ui.stats_view import StatsSummaryWidget, StatsFeedbackWidget
+# from client.services.stats_feedback import start_stats_feedback # Removed (Server-side logic)
 from client.ui.crt_effects import CRTEffectsWidget
 from client.ui.pipboy_design import get_crt_background_style, get_title_text_style
 import client.ui.name as name
@@ -210,9 +212,11 @@ class MainWindow(QMainWindow):
         main_layout.addWidget(self.status_bar)
         
         # 탭 바 추가
-        self.tab_bar = PipBoyTabBar(["VOICE", "PERSONALITY"])
+        self.tab_bar = PipBoyTabBar(["VOICE", "PERSONALITY", "STATS"])
         self.tab_bar.tab_changed.connect(self.on_tab_changed)
         main_layout.addWidget(self.tab_bar)
+        # STATS 탭은 초기 숨김 (세션 종료 시 노출)
+        self.tab_bar.set_tab_visible("STATS", False)
         
         # CRT 화면 영역 (좌우 패널 구조)
         self.crt_screen_widget = QWidget()
@@ -261,7 +265,17 @@ class MainWindow(QMainWindow):
         self.list_layout.setSpacing(2)
         
         self.scroll_area.setWidget(self.list_container)
-        left_layout.addWidget(self.scroll_area)
+
+        # 좌측 패널: (VOICE/PERSONALITY) 리스트 <-> (STATS) 요약 위젯 전환
+        self.stats_summary_widget = StatsSummaryWidget()
+        self.left_stack_container = QWidget()
+        self.left_stack_container.setStyleSheet("background-color: #000000;")
+        self.left_stack = QStackedLayout(self.left_stack_container)
+        self.left_stack.setContentsMargins(0, 0, 0, 0)
+        self.left_stack.addWidget(self.scroll_area)  # index 0
+        self.left_stack.addWidget(self.stats_summary_widget)  # index 1
+        self.left_stack.setCurrentWidget(self.scroll_area)
+        left_layout.addWidget(self.left_stack_container)
         
         crt_layout.addWidget(self.left_panel)
         
@@ -272,9 +286,17 @@ class MainWindow(QMainWindow):
         right_container_layout.setContentsMargins(0, 0, 0, 8)  # 아래쪽 마진 8px
         right_container_layout.setSpacing(2)  # 상세 패널과 버튼 사이 최소 간격
         
-        # 상세 패널
+        # 우측 컨테이너: (VOICE/PERSONALITY) 상세 패널 <-> (STATS) 피드백 위젯 전환
         self.detail_panel = PipBoyDetailPanel()
-        right_container_layout.addWidget(self.detail_panel)
+        self.stats_feedback_widget = StatsFeedbackWidget()
+        self.right_stack_container = QWidget()
+        self.right_stack_container.setStyleSheet("background-color: #000000;")
+        self.right_stack = QStackedLayout(self.right_stack_container)
+        self.right_stack.setContentsMargins(0, 0, 0, 0)
+        self.right_stack.addWidget(self.detail_panel)  # index 0
+        self.right_stack.addWidget(self.stats_feedback_widget)  # index 1
+        self.right_stack.setCurrentWidget(self.detail_panel)
+        right_container_layout.addWidget(self.right_stack_container, 1)
         
         # 하단 버튼 영역
         # 상세 패널의 테두리(10px 안쪽)와 정렬되도록 마진 조정
@@ -332,10 +354,13 @@ class MainWindow(QMainWindow):
                 target_height = self.left_panel.height()
                 self.right_container.setFixedHeight(target_height)
                 
-                # detail_panel 높이를 계산: right_container 높이 - 간격(2px) - bottom_panel 높이(60px)
-                detail_panel_height = target_height - 2 - 60  # spacing(2) + bottom_panel(60)
-                if detail_panel_height > 0:
-                    self.detail_panel.setFixedHeight(detail_panel_height)
+                # 우측 컨텐츠 높이 = right_container 높이 - spacing - (하단 패널 높이 if visible)
+                bottom_h = self.bottom_panel.height() if self.bottom_panel.isVisible() else 0
+                content_h = target_height - 2 - bottom_h  # spacing(2) + bottom_panel(visible height)
+                if content_h > 0:
+                    self.right_stack_container.setFixedHeight(content_h)
+                    self.detail_panel.setFixedHeight(content_h)
+                    self.stats_feedback_widget.setFixedHeight(content_h)
         
         from PyQt6.QtCore import QTimer
         # 여러 시점에서 높이 동기화
@@ -357,6 +382,10 @@ class MainWindow(QMainWindow):
         self.current_selected_item = None
         self.current_tab = "VOICE"
         self.current_selected_index = -1  # 키보드 네비게이션용
+
+        # Stats feedback worker state (LLM)
+        self._stats_feedback_request_id = 0
+        self._stats_feedback_worker = None
         
         # 탭별 선택 상태 저장 (탭 이동 시에도 유지)
         self.selected_voice_item = None  # 선택된 Voice 아이템 이름
@@ -493,6 +522,21 @@ class MainWindow(QMainWindow):
         """탭 변경 처리"""
         # 탭 변경 시 선택 상태는 유지 (해제하지 않음)
         self.current_tab = tab_name
+
+        # STATS 탭: 좌/우 패널을 stats 화면으로 전환
+        if tab_name == "STATS":
+            # 좌: 요약, 우: 피드백, 하단 버튼 숨김
+            self.left_stack.setCurrentWidget(self.stats_summary_widget)
+            self.right_stack.setCurrentWidget(self.stats_feedback_widget)
+            self.bottom_panel.hide()
+            self._sync_heights()
+            return
+
+        # VOICE/PERSONALITY 탭: 기존 UI로 복귀
+        self.left_stack.setCurrentWidget(self.scroll_area)
+        self.right_stack.setCurrentWidget(self.detail_panel)
+        self.bottom_panel.show()
+        self._sync_heights()
         
         # 현재 탭에 맞는 선택 상태로 전환 및 아이템 로드
         if tab_name == "VOICE":
@@ -514,6 +558,7 @@ class MainWindow(QMainWindow):
                 self.detail_panel.set_item("PERSONALITY SELECTION", "Select a personality from the list", icon="")
         
         self.update_confirm_button()
+        self.update_status_bar()
 
     def update_confirm_button(self):
         """Voice와 Personality가 둘 다 선택되었는지 확인하고 Confirm 버튼 활성화"""
@@ -537,6 +582,36 @@ class MainWindow(QMainWindow):
         
         # 세션 시작 시그널 발생
         self.toggle_session_signal.emit()
+
+    def show_stats(self, summary: dict):
+        """
+        세션 종료 후 Stats 탭을 노출하고 자동으로 전환하며, summary를 화면에 표시.
+        (Agent에서 이미 생성된 리뷰를 포함하여 전달받음)
+        """
+        try:
+            self.stats_summary_widget.set_summary(summary)
+        except Exception:
+            pass
+
+        try:
+            personality = getattr(name, "user_personality", "") or ""
+            # Agent에서 보내준 review 텍스트 사용
+            review_text = summary.get("review", "No feedback available.")
+            
+            self.stats_feedback_widget.set_personality(personality)
+            self.stats_feedback_widget.set_feedback_text(review_text)
+        except Exception:
+            pass
+
+        # STATS 탭 노출 + 자동 전환
+        try:
+            self.tab_bar.set_tab_visible("STATS", True)
+            self.tab_bar.set_current_tab("STATS")
+        except Exception:
+            pass
+
+        # UI 스왑 실행
+        self.on_tab_changed("STATS")
 
     def handle_voice_item_click(self, clicked_item, voice_name, voice_id=None):
         """Voice 아이템 클릭 처리"""
@@ -766,19 +841,24 @@ class MainWindow(QMainWindow):
             if self.left_panel.height() > 0 and self.left_panel.isVisible():
                 target_height = self.left_panel.height()
                 self.right_container.setFixedHeight(target_height)
-                # detail_panel 높이 계산: right_container 높이 - 간격(2px) - bottom_panel 높이(60px)
-                detail_panel_height = target_height - 2 - 60
-                if detail_panel_height > 0:
-                    self.detail_panel.setFixedHeight(detail_panel_height)
+                bottom_h = self.bottom_panel.height() if self.bottom_panel.isVisible() else 0
+                content_h = target_height - 2 - bottom_h
+                if content_h > 0:
+                    self.right_stack_container.setFixedHeight(content_h)
+                    self.detail_panel.setFixedHeight(content_h)
+                    self.stats_feedback_widget.setFixedHeight(content_h)
         elif obj == self.right_container and event.type() == event.Type.Resize:
             # 오른쪽 컨테이너가 리사이즈될 때도 높이 재동기화
             if self.left_panel.height() > 0 and self.left_panel.isVisible():
                 if self.right_container.height() != self.left_panel.height():
                     target_height = self.left_panel.height()
                     self.right_container.setFixedHeight(target_height)
-                    detail_panel_height = target_height - 2 - 60
-                    if detail_panel_height > 0:
-                        self.detail_panel.setFixedHeight(detail_panel_height)
+                    bottom_h = self.bottom_panel.height() if self.bottom_panel.isVisible() else 0
+                    content_h = target_height - 2 - bottom_h
+                    if content_h > 0:
+                        self.right_stack_container.setFixedHeight(content_h)
+                        self.detail_panel.setFixedHeight(content_h)
+                        self.stats_feedback_widget.setFixedHeight(content_h)
         return super().eventFilter(obj, event)
     
     def showEvent(self, event):
@@ -793,10 +873,12 @@ class MainWindow(QMainWindow):
         if self.left_panel.height() > 0 and self.left_panel.isVisible():
             target_height = self.left_panel.height()
             self.right_container.setFixedHeight(target_height)
-            # detail_panel 높이 계산: right_container 높이 - 간격(2px) - bottom_panel 높이(60px)
-            detail_panel_height = target_height - 2 - 60
-            if detail_panel_height > 0:
-                self.detail_panel.setFixedHeight(detail_panel_height)
+            bottom_h = self.bottom_panel.height() if self.bottom_panel.isVisible() else 0
+            content_h = target_height - 2 - bottom_h
+            if content_h > 0:
+                self.right_stack_container.setFixedHeight(content_h)
+                self.detail_panel.setFixedHeight(content_h)
+                self.stats_feedback_widget.setFixedHeight(content_h)
 
 if __name__ == "__main__":
     app = QApplication(sys.argv)

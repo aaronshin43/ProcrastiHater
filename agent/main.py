@@ -12,8 +12,8 @@ from livekit.plugins import elevenlabs, openai, silero
 
 # shared 폴더 import를 위한 경로 추가
 sys.path.append(os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
-from shared.protocol import Packet
-from shared.constants import SystemEvents, ScreenEvents, VisionEvents
+from shared.protocol import Packet, PacketMeta
+from shared.constants import SystemEvents, ScreenEvents, VisionEvents, PacketCategory
 from agent.memory import AgentMemory
 from agent.prompts import SYSTEM_PROMPT
 from agent.llm import LLMHandler
@@ -237,34 +237,9 @@ async def entrypoint(ctx: JobContext):
             pass
 
 
-    @ctx.room.on("data_received")
-    def on_data(data_packet, participant=None, kind=None, topic=None):
-        nonlocal current_persona, neutral_check_task, tts_plugin # 외부 변수 수정을 위해 선언
-        
-        # 1. payload 추출 (DataPacket 객체일 수도, bytes일 수도 있음)
-        try:
-            if hasattr(data_packet, 'data'):
-                payload = data_packet.data
-            else:
-                payload = data_packet
-
-            # 2. 바이트 디코딩
-            if isinstance(payload, bytes):
-                decoded_str = payload.decode('utf-8')
-            else:
-                decoded_str = str(payload)
-                
-        except Exception as e:
-            logger.error(f"❌ 데이터 디코딩 실패: {e}")
-            return
-
-        # 3. 패킷 파싱
-        try:
-            packet = Packet.from_json(decoded_str)
-            logger.info(f"📨 Packet Received: {packet.event}") # 수신 로그 강화
-        except Exception as e:
-            logger.error(f"❌ JSON 파싱 실패: {e} / Raw: {decoded_str}")
-            return
+    async def process_packet(packet):
+        """실제 패킷 처리 로직 (비동기)"""
+        nonlocal current_persona, neutral_check_task, tts_plugin, audio_source, audio_track
 
         try:
             # 0. 성격 변경 이벤트 처리
@@ -302,6 +277,64 @@ async def entrypoint(ctx: JobContext):
                 memory.clear()
                 return
 
+            # 0.9 세션 종료 이벤트 (통계/한줄평 생성 및 클라이언트에 전송)
+            if packet.event == SystemEvents.SESSION_END:
+                logger.info("---------- 🛑 Session End Requested ----------")
+                
+                # 1. 통계 수집
+                stats = memory.get_session_stats()
+                
+                # 2. LLM 회고/한줄평 생성
+                review_system_prompt = f"""
+                You are {current_persona}. The user has finished their work session.
+                Review their performance based on the violation stats.
+                
+                Stats:
+                {stats}
+                
+                Task:
+                1. Give a score (0-100).
+                2. Give a ONE-LINE review comment (ruthless, funny, or praising based on your persona).
+                3. Keep it under 2 sentences.
+                """
+                
+                try:
+                    review_text = await llm_handler.get_scolding(review_system_prompt, "Session Finished.")
+                    logger.info(f"📝 Session Review: {review_text}")
+                except Exception as e:
+                    logger.error(f"Review Generation Failed: {e}")
+                    review_text = "Work done. Now get lost."
+
+                # 3. 클라이언트로 요약 패킷 전송
+                summary_packet = Packet(
+                    event=SystemEvents.SESSION_SUMMARY,
+                    data={
+                        "stats": stats,
+                        "review": review_text
+                    },
+                    meta=PacketMeta(category=PacketCategory.SYSTEM)
+                )
+                
+                # LiveKit DataChannel로 전송 (문자열 -> 바이트)
+                await ctx.room.local_participant.publish_data(summary_packet.to_json().encode('utf-8'))
+                logger.info("📤 Session Summary Sent to Client")
+
+                # 4. 리뷰 TTS 송출 (마지막 잔소리)
+                try:
+                    stream = tts_plugin.synthesize(review_text)
+                    async for chunk in stream:
+                        frame = chunk.frame
+                        if audio_source is None:
+                            audio_source = rtc.AudioSource(frame.sample_rate, frame.num_channels)
+                            audio_track = rtc.LocalAudioTrack.create_audio_track("agent-voice", audio_source)
+                            await ctx.room.local_participant.publish_track(audio_track)
+                        await audio_source.capture_frame(frame)
+                    logger.info("🔊 Session Review TTS Finished")
+                except Exception as e:
+                    logger.error(f"Review TTS Error: {e}")
+                
+                return
+
             # Special Handling for Screen Events (Filtering)
             if packet.event == ScreenEvents.WINDOW_CHANGE:
                 # 딴짓/생산성 키워드 (소문자 기준)
@@ -337,7 +370,7 @@ async def entrypoint(ctx: JobContext):
                     screen_violation_key = "DISTRACTING_ACTIVITY"
                     if memory.should_alert(screen_violation_key, cooldown_seconds=10):
                         memory.add_event(screen_violation_key, packet.data)
-                        asyncio.create_task(scold_user(packet))
+                        await scold_user(packet)
                     return
                 else:
                     # 생산적이거나 중립적인 창
@@ -391,6 +424,38 @@ async def entrypoint(ctx: JobContext):
             logger.error(f"❌ 로직 처리 중 오류: {e}")
             import traceback
             traceback.print_exc()
+
+    @ctx.room.on("data_received")
+    def on_data(data_packet, participant=None, kind=None, topic=None):
+        nonlocal current_persona, neutral_check_task, tts_plugin # 외부 변수 수정을 위해 선언
+        
+        # 1. payload 추출 (DataPacket 객체일 수도, bytes일 수도 있음)
+        try:
+            if hasattr(data_packet, 'data'):
+                payload = data_packet.data
+            else:
+                payload = data_packet
+
+            # 2. 바이트 디코딩
+            if isinstance(payload, bytes):
+                decoded_str = payload.decode('utf-8')
+            else:
+                decoded_str = str(payload)
+                
+        except Exception as e:
+            logger.error(f"❌ 데이터 디코딩 실패: {e}")
+            return
+
+        # 3. 패킷 파싱
+        try:
+            packet = Packet.from_json(decoded_str)
+            logger.info(f"📨 Packet Received: {packet.event}") # 수신 로그 강화
+        except Exception as e:
+            logger.error(f"❌ JSON 파싱 실패: {e} / Raw: {decoded_str}")
+            return
+
+        # 비동기 처리 로직은 별도 태스크로 실행
+        asyncio.create_task(process_packet(packet))
 
 if __name__ == "__main__":
     logging.basicConfig(level=logging.INFO)

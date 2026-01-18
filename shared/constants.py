@@ -16,7 +16,8 @@ class ScreenEvents:
 class SystemEvents:
     """System events"""
     SESSION_START = "SESSION_START"
-    SESSION_END = "SESSION_END"
+    SESSION_END = "SESSION_END"     # 세션 종료 요청 (Client -> Agent)
+    SESSION_SUMMARY = "SESSION_SUMMARY" # 세션 요약 데이터 (Agent -> Client)
     PERSONALITY_UPDATE = "PERSONALITY_UPDATE" # 성격 변경 이벤트
 
 # Packet categories

@@ -78,6 +78,13 @@ class AgentMemory:
 
         summary_lines.append("\n누적 위반 횟수:")
         for evt, count in self.violation_counts.items():
-            summary_lines.append(f"- {evt}: {count}회")
+             summary_lines.append(f"- {evt}: {count}회")
 
         return "\n".join(summary_lines)
+
+    def get_session_stats(self) -> dict:
+        """세션 종료 시 전체 통계 반환"""
+        return {
+            "violation_counts": dict(self.violation_counts),
+            "total_violations": sum(self.violation_counts.values())
+        }

@@ -201,17 +201,31 @@ def main():
             print("   - Hide Main Window, Show Floating Widget")
 
     def stop_session_to_main_menu():
-        """Quit Button: 세션 종료 후 메인 메뉴로 복귀"""
-        print("🛑 Stopping Session -> Main Menu")
+        """Quit Button: 세션 종료 후 메인 메뉴로 복귀 (Agent 처리 방식)"""
+        print("🛑 Stopping Session Request...")
         
-        # UI 상태 변경 (먼저 변경하여 반응성 확보)
+        # 1. 종료 패킷 전송 (Agent가 통계 정리하고 리뷰 생성하도록 요청)
+        if livekit_client.is_connected():
+            end_packet = Packet(
+                event=SystemEvents.SESSION_END,
+                data={},
+                meta=PacketMeta(category=PacketCategory.SYSTEM)
+            )
+            livekit_client.send_packet(end_packet)
+            print("📤 Sent SESSION_END packet. Waiting for Summary...")
+        else:
+            # 연결 안되어있으면 그냥 로컬 종료
+            _force_stop_client()
+
+        # UI는 유지하거나 "종료 중..." 표시를 하면 좋겠지만,
+        # 일단 플로팅 위젯만 숨기고 메인 윈도우 띄움 (데이터 오면 갱신)
         floating_widget.hide()
         debug_window.hide()
         main_window.show()
         main_window.activateWindow()
-        main_window.raise_()
-        
-        # 서비스 종료
+
+    def _force_stop_client():
+        """클라이언트 서비스 강제 종료 (연결 끊기)"""
         if vision_worker.isRunning():
             vision_worker.stop()
         if screen_worker.isRunning():
@@ -219,10 +233,47 @@ def main():
         
         if livekit_client.is_connected():
             livekit_client.disconnect()
+        print("🔌 Client Services Stopped.")
+
+    def handle_session_summary(packet: Packet):
+        """Agent로부터 세션 요약(통계+리뷰) 수신 시 처리"""
+        print("📥 Received Session Summary from Agent!")
         
-        session_stats.stop_session()
-        print("📊 Final Stats:", session_stats.get_summary())
-        print("   - Show Main Window, Hide Floating Widget")
+        # 1. 즉시 감지 워커 중지 (Zombie Session 방지)
+        if vision_worker.isRunning():
+            vision_worker.stop()
+        if screen_worker.isRunning():
+            screen_worker.stop()
+        print("🛑 Detection Workers Stopped.")
+
+        data = packet.data
+        stats = data.get("stats", {})
+        review = data.get("review", "")
+        
+        # 2. 로컬 통계 객체 업데이트 및 지속 시간 계산
+        # Agent가 준 통계(stats)를 우선하지만, 지속 시간은 로컬 시간 기준으로 계산
+        current_duration = time.time() - session_stats.start_time
+        
+        # 'StatsSummaryWidget'이 기대하는 형식("counts", "duration_seconds")으로 변환
+        summary_data = {
+            "duration_seconds": current_duration,
+            "counts": stats.get("violation_counts", {}), # Agent가 보낸 위반 횟수 딕셔너리
+            "review": review,
+            "total_violations": stats.get("total_violations", 0)
+        }
+        
+        # 3. 통계 UI 표시
+        main_window.show_stats(summary_data)
+        
+        # **중요**: 음성(TTS)이 재생 중일 수 있으므로 즉시 끊지 않고
+        # 잠시 후 끊거나, 사용자가 창을 닫을 때 끊기게 둘 수 있음.
+        # 사용자의 요청: "음성 데이터까지 다 받고(듣고) 끊는 방식"
+        pass
+
+    # LiveKit Client에 패킷 수신 핸들러 등록 필요
+    # 현재 LiveKitClient 클래스는 on_data_received 시그널이 있는지 확인 필요
+    # main.py에서 직접 등록하거나 client 내부에서 처리
+    livekit_client.packet_received_signal.connect(lambda p: handle_session_summary(p) if p.event == SystemEvents.SESSION_SUMMARY else None)
 
     def toggle_debug_window():
         """Key B: 디버그 윈도우 토글"""

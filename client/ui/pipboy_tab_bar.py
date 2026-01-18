@@ -51,6 +51,11 @@ class PipBoyTabBar(QWidget):
         
     def on_tab_clicked(self, tab_name):
         """탭 클릭 처리"""
+        # 숨겨진 탭은 클릭으로 활성화되지 않도록 가드
+        tab_label = self.tab_labels.get(tab_name)
+        if tab_label is not None and not tab_label.isVisible():
+            return
+
         if tab_name != self.current_tab:
             self.current_tab = tab_name
             self.update()
@@ -59,6 +64,14 @@ class PipBoyTabBar(QWidget):
     def set_current_tab(self, tab_name):
         """현재 탭 설정"""
         self.current_tab = tab_name
+        self.update()
+
+    def set_tab_visible(self, tab_name: str, visible: bool):
+        """특정 탭의 표시/숨김 설정"""
+        tab_label = self.tab_labels.get(tab_name)
+        if tab_label is None:
+            return
+        tab_label.setVisible(bool(visible))
         self.update()
         
     def paintEvent(self, event):
