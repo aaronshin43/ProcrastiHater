@@ -1,6 +1,9 @@
 import asyncio
 import sys
 import os
+import sounddevice as sd
+import numpy as np
+import ctypes
 from typing import Optional
 from livekit import rtc, api
 from PyQt6.QtCore import QObject, pyqtSignal, QThread
@@ -39,6 +42,11 @@ class LiveKitClient(QObject):
         self._should_reconnect = False # 자동 재연결 플래그
         self._paused = False
         self.audio_players = {} # track_sid -> AudioPlayer
+        self._mic_track: Optional[rtc.LocalAudioTrack] = None
+        self._mic_publisher: Optional[rtc.TrackPublication] = None
+        self._audio_source: Optional[rtc.AudioSource] = None
+        self._mic_stream: Optional[sd.InputStream] = None
+        self._is_mic_muted = True
         self._pending_personality_packet: Optional[Packet] = None
         self._pending_session_start_packet: Optional[Packet] = None
 
@@ -62,8 +70,18 @@ class LiveKitClient(QObject):
 
     def disconnect(self):
         """연결 종료 요청"""
-        self._should_reconnect = False # 재연결 비활성화f):
-        """연결 종료 요청"""
+        self._should_reconnect = False
+        
+        # Stop mic stream locally
+        if self._mic_stream:
+            try:
+                self._mic_stream.stop()
+                self._mic_stream.close()
+                self._mic_stream = None
+                print("🎤 Mic Stream Stopped")
+            except Exception as e:
+                print(f"Error closing mic stream: {e}")
+
         if self._connected:
              asyncio.run_coroutine_threadsafe(self._disconnect_room(), self._worker.loop)
     
@@ -116,6 +134,10 @@ class LiveKitClient(QObject):
             
             print("✅ Connection established!")
             self._connected = True
+            
+            # 마이크 트랙 초기화 및 게시 (Muted 상태로 시작)
+            await self._init_microphone()
+
             self.connected_signal.emit()
 
             # 연결 직후 대기 중인 상태(성격 등)가 있다면 전송
@@ -144,6 +166,111 @@ class LiveKitClient(QObject):
         if self._should_reconnect and not self._connected:
             print("🔄 Reconnecting now...")
             await self._connect_room()
+
+    async def _init_microphone(self):
+        """마이크 트랙 생성 및 게시 (초기 상태: Mute)"""
+        if not self.room or not self.room.local_participant: return
+        try:
+            print("🎤 Initializing Microphone...")
+            
+            SAMPLE_RATE = 48000
+            CHANNELS = 1
+            
+            # 1. AudioSource 생성
+            self._audio_source = rtc.AudioSource(SAMPLE_RATE, CHANNELS)
+            
+            # 2. 마이크 트랙 생성 (Source 지정)
+            self._mic_track = rtc.LocalAudioTrack.create_audio_track("user-mic", self._audio_source)
+            
+            # 3. 트랙 게시 (Muted=True로 게시하여 처음엔 소리가 안 나가게 함)
+            options = rtc.TrackPublishOptions(source=rtc.TrackSource.SOURCE_MICROPHONE)
+            self._mic_publisher = await self.room.local_participant.publish_track(self._mic_track, options)
+            
+            # 4. SoundDevice 입력 스트림 시작
+            self._start_mic_capture(SAMPLE_RATE, CHANNELS)
+            
+            # 명시적으로 Mute 설정 (Software Mute)
+            self._is_mic_muted = True
+            print("🎤 Microphone Published (Software Muted)")
+            
+        except Exception as e:
+            print(f"❌ Microphone Init Failed: {e}")
+
+    def _start_mic_capture(self, sample_rate, channels):
+        """Start sounddevice input stream"""
+        def callback(indata, frames, time, status):
+            if status:
+                print(f"Mic Status: {status}")
+            
+            # Software Mute Logic
+            if self._is_mic_muted:
+                indata.fill(0)
+
+            if self._audio_source:
+                try:
+                    # Create AudioFrame
+                    audio_frame = rtc.AudioFrame.create(sample_rate, channels, frames)
+                    
+                    # Robust copy: Cast both buffers to flat byte arrays
+                    # This handles differences in shape (e.g. (N,1) vs (N)) and structure
+                    src_view = memoryview(indata).cast('B')
+                    dst_view = memoryview(audio_frame.data).cast('B')
+                    
+                    # Copy bytes
+                    dst_view[:len(src_view)] = src_view
+                    
+                    # capture_frame is a coroutine, so we must schedule it on the loop
+                    if self._worker.loop and self._worker.loop.is_running():
+                        asyncio.run_coroutine_threadsafe(
+                            self._audio_source.capture_frame(audio_frame),
+                            self._worker.loop
+                        )
+                except Exception as e:
+                    print(f"Mic Capture Error: {e}")
+
+        try:
+            self._mic_stream = sd.InputStream(
+                channels=channels,
+                samplerate=sample_rate,
+                dtype='int16',
+                callback=callback
+            )
+            self._mic_stream.start()
+            print(f"🎤 Mic Stream Started: {sample_rate}Hz, {channels}ch")
+        except Exception as e:
+            print(f"❌ Failed to start mic stream: {e}")
+            
+    def toggle_microphone(self):
+        """마이크 상태 토글"""
+        new_state = not self._is_mic_muted
+        self.set_microphone_mute(new_state)
+
+    def set_microphone_mute(self, muted: bool):
+        """마이크 Mute/Unmute 제어 및 Agent 오디오 더킹(Ducking)"""
+        if self._worker.loop:
+            asyncio.run_coroutine_threadsafe(self._set_microphone_mute_async(muted), self._worker.loop)
+
+    async def _set_microphone_mute_async(self, muted: bool):
+        # Update software mute state
+        self._is_mic_muted = muted
+        
+        status = "🔇 Muted" if muted else "🎙️ Unmuted (Live)"
+        print(f"🎤 Mic Status: {status}")
+
+        # Interruption 기능: 내가 말할 때 Agent 소리 끄기 (Ducking/Mute)
+        # 내가 말하면(muted=False) -> Agent AudioPlayer Mute ON
+        # 내가 멈추면(muted=True) -> Agent AudioPlayer Mute OFF
+        
+        target_player_mute_state = not muted   # 내가 Unmute(False)하면 Player는 Mute(True)
+        
+        for sid, player in self.audio_players.items():
+            player.set_muted(target_player_mute_state)
+            
+        if not muted: 
+            print("🤫 User speaking - Muting Agent Audio")
+        else:
+             print("🔊 User stopped - Unmuting Agent Audio") 
+
 
     async def _disconnect_room(self):
         """실제 연결 해제 로직 (Coroutine)"""

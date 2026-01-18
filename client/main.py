@@ -26,6 +26,7 @@ from shared.protocol import Packet, PacketMeta
 from shared.constants import SystemEvents, PacketCategory
 from dotenv import load_dotenv
 import keyboard
+import time
 from PyQt6.QtCore import QObject, pyqtSignal
 
 class GlobalKeyManager(QObject):
@@ -36,15 +37,18 @@ class GlobalKeyManager(QObject):
     toggle_session_signal = pyqtSignal()
     toggle_debug_signal = pyqtSignal()
     toggle_pause_signal = pyqtSignal()
+    toggle_mic_signal = pyqtSignal()
 
     def __init__(self):
         super().__init__()
+        self.last_mic_toggle_time = 0
         # keyboard listeners run in a separate thread, so we accept that.
         # pyqtSignals are thread-safe when emitted from other threads.
         try:
             keyboard.add_hotkey('alt+a', self._on_session_toggle)
             keyboard.add_hotkey('alt+b', self._on_debug_toggle)
             keyboard.add_hotkey('alt+p', self._on_pause_toggle)
+            keyboard.add_hotkey('alt+s', self._on_mic_toggle)
         except ImportError:
             print("❌ 'keyboard' library not found. Global hotkeys will not work.")
             print("   Please run: pip install keyboard")
@@ -56,6 +60,16 @@ class GlobalKeyManager(QObject):
     def _on_debug_toggle(self):
         print("⌨️ Global Hotkey: Alt+B")
         self.toggle_debug_signal.emit()
+    
+    def _on_mic_toggle(self):
+        # Simple debounce to prevent key repeat from toggling rapidly
+        now = time.time()
+        if now - self.last_mic_toggle_time < 0.3:
+            return
+        self.last_mic_toggle_time = now
+        
+        print("⌨️ Global Hotkey: Alt+S (Mic Toggle)")
+        self.toggle_mic_signal.emit()
 
     def _on_pause_toggle(self):
         print("⌨️ Global Hotkey: Alt+P")
@@ -197,6 +211,7 @@ def main():
     key_manager.toggle_session_signal.connect(toggle_session)
     key_manager.toggle_debug_signal.connect(toggle_debug_window)
     key_manager.toggle_pause_signal.connect(toggle_pause)
+    key_manager.toggle_mic_signal.connect(livekit_client.toggle_microphone)
 
     # 성격 변경 시그널 연결 (MainWindow -> LiveKitClient)
     main_window.personality_changed_signal.connect(livekit_client.send_packet)
@@ -207,7 +222,7 @@ def main():
     # ...
 
     # 7. 초기 화면 표시
-    print("✨ Client Ready. Press 'Alt+A' to start/stop session, 'Alt+B' to toggle debug view, 'Alt+P' to pause/resume.")
+    print("✨ Client Ready. Press 'Alt+A' to start/stop session, 'Alt+B' to toggle debug view, 'Alt+P' to pause/resume, 'Alt+S' to talk.")
     main_window.show()
 
     # 8. 메인 루프 실행

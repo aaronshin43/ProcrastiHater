@@ -53,6 +53,17 @@ class AudioSink(threading.Thread):
         data = np.frombuffer(frame.data, dtype=np.int16)
         # livekit 0.17+ AudioFrame uses num_channels instead of channels
         self.queue.put((data, frame.sample_rate, frame.num_channels))
+    
+    def clear(self):
+        """큐를 비워 재생을 즉시 중단하는 효과"""
+        with self.queue.mutex:
+            self.queue.queue.clear()
+        
+        # 스트림도 플러시 (가능하다면) - sounddevice는 abort가 있긴 함
+        if self.stream and self.stream.active:
+             self.stream.abort()
+             self.stream.close()
+             self.stream = None
 
     def stop(self):
         self._stop_event.set()
@@ -66,6 +77,12 @@ class AudioPlayer:
         self.sink = AudioSink()
         self.sink.start()
         self.task = None
+        self._is_muted = False  # Track interruption state
+
+    def set_muted(self, muted: bool):
+        self._is_muted = muted
+        if muted:
+            self.sink.clear()
 
     async def start(self, track: rtc.Track):
         self.task = self.loop.create_task(self._consume_track(track))
@@ -75,6 +92,9 @@ class AudioPlayer:
         print(f"🎧 Started listening to track: {track.sid}")
         try:
             async for event in audio_stream:
+                if self._is_muted:
+                    continue  # Muted 상태면 재생 큐에 넣지 않고 버림
+                
                 # LiveKit 0.17.x 이상에서는 AudioStream이 AudioFrameEvent를 반환합니다.
                 # 실제 오디오 데이터는 event.frame에 들어있습니다.
                 self.sink.put_frame(event.frame)
@@ -87,3 +107,12 @@ class AudioPlayer:
         if self.task:
             self.task.cancel()
         self.sink.stop()
+        
+    async def stop_async(self):
+        """Helper for async context"""
+        self.sink.clear()
+
+    async def stop_async(self):
+        """인터럽트용: 즉시 재생을 멈추고 큐를 비움"""
+        self.sink.clear()
+        print("🔇 Audio Player Interrupted (Cleared Buffer)")

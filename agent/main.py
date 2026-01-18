@@ -7,8 +7,8 @@ from dotenv import load_dotenv
 load_dotenv()
 
 from livekit import rtc
-from livekit.agents import JobContext, WorkerOptions, cli, tts
-from livekit.plugins import elevenlabs
+from livekit.agents import JobContext, WorkerOptions, cli, tts, stt, vad
+from livekit.plugins import elevenlabs, openai, silero
 
 # shared 폴더 import를 위한 경로 추가
 sys.path.append(os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
@@ -36,12 +36,90 @@ async def entrypoint(ctx: JobContext):
         
     tts_plugin = elevenlabs.TTS(api_key=tts_api_key)
 
-    # 3. Audio Track 변수 (첫 오디오 데이터 수신 시 초기화)
+    # 3. STT & VAD 초기화
+    stt_plugin = openai.STT()
+    vad_plugin = silero.VAD.load()
+
+    # 4. Audio Track 변수 (첫 오디오 데이터 수신 시 초기화)
     audio_source = None
     audio_track = None
     
-    # 4. 현재 성격 (기본값)
+    # 5. 현재 성격 (기본값)
     current_persona = "Strict Devil Instructor"
+
+    async def handle_user_speech(track: rtc.Track):
+        """사용자 오디오 트랙 처리 (STT -> LLM -> TTS)"""
+        logger.info(f"🎤 Started listening to user track: {track.sid}")
+        audio_stream = rtc.AudioStream(track)
+        
+        # STT 스트림 생성
+        stt_stream = stt_plugin.stream()
+        
+        # VAD 스트림 생성 (음성 활동 감지용)
+        vad_stream = vad_plugin.stream()
+
+        async def _read_stt_results():
+            nonlocal audio_source, audio_track, current_persona
+            async for event in stt_stream:
+                if event.type == stt.SpeechEventType.FINAL_TRANSCRIPT:
+                    text = event.alternatives[0].text
+                    if not text or len(text.strip()) < 2: continue
+                    
+                    logger.info(f"🗣️ User Said: {text}")
+                    
+                    # 🗣️ 사용자 핑계에 대한 LLM 처리
+                    # SYSTEM_PROMPT의 {persona} 부분을 현재 성격으로 치환
+                    formatted_system_prompt = SYSTEM_PROMPT.format(persona=current_persona)
+                    
+                    context_str = f"""
+                    [NEW INTERACTION]
+                    - User is talking back/making an excuse.
+                    - User Said: "{text}"
+                    
+                    [Current Memory]
+                    {memory.get_summary()}
+                    
+                    Determine if the user's excuse is valid. If not, scold them harder.
+                    """
+                    
+                    try:
+                        reply = await llm_handler.get_scolding(formatted_system_prompt, context_str)
+                        logger.info(f"🤖 Reply to Excuse: {reply}")
+                        
+                        # TTS 송출 (scold_user 로직 재사용 가능하면 함수로 분리하는게 좋지만 일단 인라인)
+                        stream = tts_plugin.synthesize(reply)
+                        async for chunk in stream:
+                            frame = chunk.frame
+                            if audio_source is None:
+                                logger.info(f"🔊 AudioSource 초기화 (Reply): {frame.sample_rate}Hz")
+                                audio_source = rtc.AudioSource(frame.sample_rate, frame.num_channels)
+                                audio_track = rtc.LocalAudioTrack.create_audio_track("agent-voice", audio_source)
+                                await ctx.room.local_participant.publish_track(audio_track)
+                            
+                            await audio_source.capture_frame(frame)
+                            
+                    except Exception as e:
+                        logger.error(f"Reply Error: {e}")
+
+        # STT 결과 수신 태스크 시작
+        asyncio.create_task(_read_stt_results())
+
+        try:
+            async for event in audio_stream:
+                 # VAD 및 STT에 오디오 프레임 전달
+                 stt_stream.push_frame(event.frame)
+                 vad_stream.push_frame(event.frame)
+        except Exception as e:
+            logger.error(f"Audio Stream Error: {e}")
+        finally:
+            stt_stream.flush()
+            stt_stream.end_input()
+
+    @ctx.room.on("track_subscribed")
+    def on_track_subscribed(track: rtc.Track, publication: rtc.TrackPublication, participant: rtc.RemoteParticipant):
+        if track.kind == rtc.TrackKind.KIND_AUDIO:
+            logger.info(f"🎧 Subscribed to User Audio: {track.sid}")
+            asyncio.create_task(handle_user_speech(track))
 
     async def scold_user(packet: Packet):
         nonlocal audio_source, audio_track, current_persona
