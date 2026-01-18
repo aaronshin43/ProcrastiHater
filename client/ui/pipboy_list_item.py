@@ -138,7 +138,7 @@ class PipBoyListItem(QWidget):
             # 선택 시: 검정 텍스트
             self.text_label.setStyleSheet("""
                 font-family: 'Courier New', monospace;
-                font-size: 22px;
+                font-size: 20px;
                 color: #000000;
                 background: transparent;
             """)
@@ -149,7 +149,7 @@ class PipBoyListItem(QWidget):
             # 기본: 녹색 텍스트
             self.text_label.setStyleSheet("""
                 font-family: 'Courier New', monospace;
-                font-size: 22px;
+                font-size: 20px;
                 color: #00FF41;
                 background: transparent;
             """)
