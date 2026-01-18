@@ -191,7 +191,7 @@ class MainWindow(QMainWindow):
 
     def __init__(self):
         super().__init__()
-        self.setWindowTitle("ProcrastiHator - Pip-Boy Edition")
+        self.setWindowTitle("ProcrastiHater - Pip-Boy Edition")
         self.setGeometry(100, 100, 1200, 800)
         
         # Pip-Boy CRT 배경 스타일
