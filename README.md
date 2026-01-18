@@ -1,8 +1,8 @@
-# ProcrastiHator
+# Procrasti-Hator
 
 **"I see you scrolling your phone instead of working."**
 
-ProcrastiHator is an AI-powered surveillance agent that forces you to be productive. It monitors your screen process and webcam activity in real-time, detecting distractions like sleeping, using your phone, or launching games. When you slack off, a personalized AI persona (e.g., Gigachad, Gordon Ramsey) verbally roasts you.
+Procrasti-Hator is an AI-powered surveillance agent that forces you to be productive. It monitors your screen process and webcam activity in real-time, detecting distractions like sleeping, using your phone, or launching games. When you slack off, a personalized AI persona (e.g., Gigachad, Gordon Ramsey) verbally roasts you.
 
 ![Python](https://img.shields.io/badge/Python-3.10%2B-blue)
 ![LiveKit](https://img.shields.io/badge/LiveKit-Realtime-orange)
