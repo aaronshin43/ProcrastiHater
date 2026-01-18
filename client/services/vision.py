@@ -95,7 +95,7 @@ class VisionWorker(QThread):
         self.GAZE_AWAY_CONSECUTIVE_FRAMES = 30  # 연속 프레임 수 (약 3초로 단축 - 더 빠르게 반응)
         
         # 휴대폰 감지 임계값
-        self.PHONE_SCORE_THRESHOLD = 0.35  # 휴대폰 감지 최소 신뢰도
+        self.PHONE_SCORE_THRESHOLD = 0.4  # 휴대폰 감지 최소 신뢰도
         
         # 얼굴 방향 계산용 추가 랜드마크
         self.LEFT_EYE_INNER = 133
