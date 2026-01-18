@@ -67,84 +67,97 @@ class _GreenBorderPanel(QWidget):
 class StatsSummaryWidget(_GreenBorderPanel):
     """
     Left box:
-    - Title: Total Distractions
-    - Total session time
-    - Sleeping/Phone/Absent/GazeAway counts
+    - Big Total Violations Count
+    - Session Time
+    - Detailed Breakdown
     """
 
     def __init__(self, parent: Optional[QWidget] = None):
         super().__init__(parent)
 
         layout = QVBoxLayout(self)
-        layout.setContentsMargins(24, 24, 24, 24)
+        layout.setContentsMargins(30, 30, 30, 30)
         layout.setSpacing(10)
 
-        self.title = QLabel("TOTAL DISTRACTIONS")
-        self.title.setStyleSheet(
+        # --- Header Section ---
+        header = QLabel("SESSION REPORT")
+        header.setAlignment(Qt.AlignmentFlag.AlignCenter)
+        header.setStyleSheet("font-family: 'Courier New'; font-size: 22px; font-weight: bold; color: #00FF41; letter-spacing: 2px;")
+        layout.addWidget(header)
+
+        layout.addSpacing(10)
+
+        # --- Total Violations (The Impactful Part) ---
+        self.lbl_total_violations = QLabel("0")
+        self.lbl_total_violations.setAlignment(Qt.AlignmentFlag.AlignCenter)
+        self.lbl_total_violations.setStyleSheet(
             """
-            font-family: 'Courier New', monospace;
-            font-size: 20px;
-            font-weight: bold;
+            font-family: 'Courier New'; 
+            font-size: 96px; 
+            font-weight: bold; 
             color: #00FF41;
-            background: transparent;
             """
         )
-        self.title.setAlignment(Qt.AlignmentFlag.AlignLeft | Qt.AlignmentFlag.AlignVCenter)
-        layout.addWidget(self.title)
+        layout.addWidget(self.lbl_total_violations)
 
-        grid = QGridLayout()
-        grid.setContentsMargins(0, 0, 0, 0)
-        grid.setHorizontalSpacing(10)
-        grid.setVerticalSpacing(10)
+        self.lbl_total_sub = QLabel("TOTAL VIOLATIONS")
+        self.lbl_total_sub.setAlignment(Qt.AlignmentFlag.AlignCenter)
+        self.lbl_total_sub.setStyleSheet("font-family: 'JetBrains Mono'; font-size: 14px; color: #00AA22;")
+        layout.addWidget(self.lbl_total_sub)
 
-        def make_label(text: str, font_size_px: int = 14) -> QLabel:
-            lbl = QLabel(text)
-            lbl.setStyleSheet(
-                f"""
-                font-family: 'JetBrains Mono', monospace;
-                font-size: {font_size_px}px;
-                color: #00FF41;
-                background: transparent;
-                """
-            )
-            lbl.setWordWrap(True)
-            return lbl
+        layout.addSpacing(30)
 
-        def make_value() -> QLabel:
-            lbl = QLabel("0")
-            lbl.setStyleSheet(
-                """
-                font-family: 'JetBrains Mono', monospace;
-                font-size: 14px;
-                font-weight: bold;
-                color: #7FFF00;
-                background: transparent;
-                """
-            )
-            lbl.setAlignment(Qt.AlignmentFlag.AlignRight | Qt.AlignmentFlag.AlignVCenter)
-            return lbl
+        # --- Session Duration ---
+        self.lbl_duration_val = QLabel("00:00:00")
+        self.lbl_duration_val.setAlignment(Qt.AlignmentFlag.AlignCenter)
+        self.lbl_duration_val.setStyleSheet("font-family: 'JetBrains Mono'; font-size: 28px; font-weight: bold; color: #00FF41;")
+        layout.addWidget(self.lbl_duration_val)
 
-        self.lbl_session_time = make_value()
-        self.lbl_sleeping = make_value()
-        self.lbl_phone = make_value()
-        self.lbl_absent = make_value()
-        self.lbl_gaze_away = make_value()
+        lbl_duration_sub = QLabel("SESSION DURATION")
+        lbl_duration_sub.setAlignment(Qt.AlignmentFlag.AlignCenter)
+        lbl_duration_sub.setStyleSheet("font-family: 'JetBrains Mono'; font-size: 12px; color: #00AA22;")
+        layout.addWidget(lbl_duration_sub)
 
-        rows = [
-            ("Total session time", self.lbl_session_time),
-            ("Slept", self.lbl_sleeping),
-            ("Phone", self.lbl_phone),
-            ("Absent", self.lbl_absent),
-            ("Looked away", self.lbl_gaze_away),
-        ]
+        layout.addSpacing(30)
 
-        for r, (label_text, value_lbl) in enumerate(rows):
-            # Make "Total session time" slightly smaller to avoid crowding
-            label_font = 13 if r == 0 else 14
-            grid.addWidget(make_label(label_text, font_size_px=label_font), r, 0)
-            grid.addWidget(value_lbl, r, 1)
+        # --- Divider ---
+        divider = QLabel()
+        divider.setFixedHeight(2)
+        divider.setStyleSheet("background-color: #005511;")
+        layout.addWidget(divider)
+        
+        layout.addSpacing(20)
 
-        layout.addLayout(grid)
+        # --- Details List (Grid) ---
+        details_container = QWidget()
+        details_layout = QGridLayout(details_container)
+        details_layout.setContentsMargins(20, 0, 20, 0)
+        details_layout.setVerticalSpacing(15)
+        details_layout.setHorizontalSpacing(20)
+
+        self.detail_map = {
+            "PHONE ADDICTION": (VisionEvents.PHONE_DETECTED, QLabel("0")),
+            "SLEEPING": (VisionEvents.SLEEPING, QLabel("0")),
+            "ABSENT": (VisionEvents.ABSENT, QLabel("0")),
+            "UNKNOWN GLAZE": (VisionEvents.GAZE_AWAY, QLabel("0")),
+            "SCREEN PLAY": ("DISTRACTING_ACTIVITY", QLabel("0")),
+        }
+
+        row = 0
+        for label, (event_key, value_widget) in self.detail_map.items():
+            # Label
+            lbl_name = QLabel(label)
+            lbl_name.setStyleSheet("font-family: 'JetBrains Mono'; font-size: 14px; color: #00FF41;")
+            
+            # Value
+            value_widget.setStyleSheet("font-family: 'JetBrains Mono'; font-size: 16px; font-weight: bold; color: #00FF41;")
+            value_widget.setAlignment(Qt.AlignmentFlag.AlignRight)
+
+            details_layout.addWidget(lbl_name, row, 0)
+            details_layout.addWidget(value_widget, row, 1)
+            row += 1
+
+        layout.addWidget(details_container)
         layout.addStretch(1)
 
         self.set_summary(None)
@@ -152,14 +165,43 @@ class StatsSummaryWidget(_GreenBorderPanel):
     def set_summary(self, summary: Optional[Dict[str, Any]]):
         summary = summary or {}
         counts = summary.get("counts") or {}
-
+        total_violations = int(summary.get("total_violations", 0))
         duration = summary.get("duration_seconds", 0.0)
-        self.lbl_session_time.setText(_format_duration_hhmmss(duration))
 
-        self.lbl_sleeping.setText(str(counts.get(VisionEvents.SLEEPING, 0)))
-        self.lbl_phone.setText(str(counts.get(VisionEvents.PHONE_DETECTED, 0)))
-        self.lbl_absent.setText(str(counts.get(VisionEvents.ABSENT, 0)))
-        self.lbl_gaze_away.setText(str(counts.get(VisionEvents.GAZE_AWAY, 0)))
+        # Update Top Stats
+        self.lbl_total_violations.setText(str(total_violations))
+        self.lbl_duration_val.setText(_format_duration_hhmmss(duration))
+        
+        # Critical Style for High Violations
+        if total_violations > 0:
+            # Red warning color for violations
+            self.lbl_total_violations.setStyleSheet(
+                """
+                font-family: 'Courier New'; 
+                font-size: 96px; 
+                font-weight: bold; 
+                color: #FF3333;
+                text-shadow: 0 0 10px #FF0000;
+                """
+            )
+            self.lbl_total_sub.setText("VIOLATIONS DETECTED")
+            self.lbl_total_sub.setStyleSheet("font-family: 'JetBrains Mono'; font-size: 14px; color: #CC2222;")
+        else:
+            self.lbl_total_violations.setStyleSheet(
+                """
+                font-family: 'Courier New'; 
+                font-size: 96px; 
+                font-weight: bold; 
+                color: #00FF41;
+                """
+            )
+            self.lbl_total_sub.setText("PERFECT SESSION")
+            self.lbl_total_sub.setStyleSheet("font-family: 'JetBrains Mono'; font-size: 14px; color: #00AA22;")
+
+        # Update Details
+        for label, (event_key, widget) in self.detail_map.items():
+            count = counts.get(event_key, 0)
+            widget.setText(f"{count}")
 
 
 class StatsFeedbackWidget(_GreenBorderPanel):
