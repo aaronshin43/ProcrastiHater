@@ -221,7 +221,14 @@ def main():
             livekit_client.disconnect()
         
         session_stats.stop_session()
-        print("📊 Final Stats:", session_stats.get_summary())
+        summary = session_stats.get_summary()
+        print("📊 Final Stats:", summary)
+
+        # STATS 탭 노출 + 자동 전환 + 내용 표시
+        try:
+            main_window.show_stats(summary)
+        except Exception as e:
+            print(f"[WARNING] Failed to show stats UI: {e}")
         print("   - Show Main Window, Hide Floating Widget")
 
     def toggle_debug_window():
