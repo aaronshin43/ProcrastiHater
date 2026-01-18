@@ -596,6 +596,7 @@ class MainWindow(QMainWindow):
         try:
             personality = getattr(name, "user_personality", "") or ""
             self.stats_feedback_widget.set_personality(personality)
+            self.stats_feedback_widget.set_summary(summary)
             self.stats_feedback_widget.set_feedback_text("Generating feedback...")
         except Exception:
             pass
