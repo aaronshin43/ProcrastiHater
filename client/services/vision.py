@@ -90,9 +90,9 @@ class VisionWorker(QThread):
         self.NO_FACE_CONSECUTIVE_FRAMES = 100  # 얼굴 부재 연속 프레임 수
         
         # 시선 벗어남 임계값 (각도 기준, 도 단위)
-        self.GAZE_PITCH_THRESHOLD = 25.0  # 위/아래 시선 벗어남 임계값 (도)
-        self.GAZE_YAW_THRESHOLD = 30.0  # 좌/우 시선 벗어남 임계값 (도)
-        self.GAZE_AWAY_CONSECUTIVE_FRAMES = 100  # 연속 프레임 수 (시선 벗어남 감지 임계값, 약 50초)
+        self.GAZE_PITCH_THRESHOLD = 20.0  # 위/아래 시선 벗어남 임계값 (도)
+        self.GAZE_YAW_THRESHOLD = 20.0  # 좌/우 시선 벗어남 임계값 (도)
+        self.GAZE_AWAY_CONSECUTIVE_FRAMES = 30  # 연속 프레임 수 (약 3초로 단축 - 더 빠르게 반응)
         
         # 휴대폰 감지 임계값
         self.PHONE_SCORE_THRESHOLD = 0.5  # 휴대폰 감지 최소 신뢰도
@@ -118,11 +118,11 @@ class VisionWorker(QThread):
         self.LEFT_CHEEK = 118   # 왼쪽 볼 안쪽 (face oval, 116보다 안쪽)
         self.RIGHT_CHEEK = 347  # 오른쪽 볼 안쪽 (face oval, 345보다 안쪽)
         
-        # 볼 가시성 검사 임계값 (민감도 낮춤)
-        self.CHEEK_Z_DEPTH_THRESHOLD = 0.15  # 볼의 z-depth 차이 임계값 (얼굴이 옆으로 돌아가면 z 값 차이가 커짐) - 더 완화
-        self.CHEEK_POSITION_THRESHOLD = 0.40  # 볼의 상대적 위치 임계값 (얼굴 중심에서 벗어난 정도) - 더 완화
-        self.CHEEK_NOSE_Z_THRESHOLD = 0.20  # 볼과 코의 z-depth 차이 임계값 - 더 완화
-        self.CHEEK_Z_DIFF_PASS_THRESHOLD = 0.03  # z-depth 차이가 이 값보다 작으면 즉시 통과 (정면 판단)
+        # 볼 가시성 검사 임계값 (민감도 높임 - Strict)
+        self.CHEEK_Z_DEPTH_THRESHOLD = 0.08
+        self.CHEEK_POSITION_THRESHOLD = 0.25
+        self.CHEEK_NOSE_Z_THRESHOLD = 0.12
+        self.CHEEK_Z_DIFF_PASS_THRESHOLD = 0.015
     
     def calculate_ear(self, landmarks, eye_indices):
         """Eye Aspect Ratio (EAR) 계산"""
@@ -683,3 +683,4 @@ class VisionWorker(QThread):
     def stop(self):
         """스레드 종료"""
         self.running = False
+        self.wait() # 스레드 종료 대기

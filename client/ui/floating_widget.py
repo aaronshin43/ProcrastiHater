@@ -90,6 +90,3 @@ class FloatingWidget(QWidget):
         # TODO: 화난 이미지로 변경하는 함수
         pass
 
-    # Global Hotkey 사용으로 인해 로컬 keyPressEvent는 제거하거나 주석 처리해도 됨
-    # 하지만 비상용으로 남겨둘 수도 있음 (현재는 Global Key가 우선이므로 제거하지 않음)
-

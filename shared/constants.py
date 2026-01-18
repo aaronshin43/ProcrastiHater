@@ -16,6 +16,7 @@ class SystemEvents:
     """System events"""
     SESSION_START = "SESSION_START"
     SESSION_END = "SESSION_END"
+    PERSONALITY_UPDATE = "PERSONALITY_UPDATE" # 성격 변경 이벤트
 
 # Packet categories
 class PacketCategory:
