@@ -19,6 +19,7 @@ numpy                          # 이미지 연산
 # --- System & Utils ---
 # 윈도우 창 제목 가져오기 (윈도우에서만 설치됨)
 pywin32; sys_platform == 'win32'
+psutil                         # 프로세스 모니터링
 python-dotenv                  # .env 파일 로드
 colorlog                       # 로그 예쁘게 찍기
 keyboard                       # global binding
