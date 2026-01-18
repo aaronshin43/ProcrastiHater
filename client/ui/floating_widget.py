@@ -1,13 +1,27 @@
 # client/ui/floating_widget.py
+import os
 from PyQt6.QtWidgets import QWidget, QLabel, QVBoxLayout, QMenu
 from PyQt6.QtCore import Qt, pyqtSignal
 from PyQt6.QtGui import QPixmap, QAction
+from . import name
 
 class FloatingWidget(QWidget):
     # 우클릭 메뉴 액션 시그널
     show_settings_signal = pyqtSignal()  # 캐릭터 설정
     pause_signal = pyqtSignal()  # 일시정지
     exit_signal = pyqtSignal()  # 종료
+    
+    # Personality 이름 -> 이미지 파일명 매핑
+    PERSONALITY_IMAGE_MAP = {
+        "Gordon Ramsey": "gorden.png",
+        "Gigachad": "chad.png",
+        "Uncle Roger": "roger.png",
+        "Anime Girl": "monika.png",
+        "Korean Mom": "korea_mom.png",
+        "Drill Sergeant": "surgeant.png",
+        "Sportscaster": "caster.png",
+        "Shakespeare": "poem.png"
+    }
     
     def __init__(self):
         super().__init__()
@@ -18,13 +32,36 @@ class FloatingWidget(QWidget):
         layout = QVBoxLayout()
         self.char_label = QLabel()
         
-        # 이미지 로드 (멤버 3이 assets 폴더에 이미지 넣어야 함)
-        pixmap = QPixmap("client/ui/assets/test.png")
+        # 초기 이미지 로드 (기본값 또는 personality 기반)
+        self.update_image_from_personality()
         
-        # 크기를 1/10로 줄이기
+        layout.addWidget(self.char_label)
+        self.setLayout(layout)
+        
+        # 드래그를 위한 초기 위치 변수
+        self.oldPos = None
+    
+    def update_image_from_personality(self):
+        """선택된 personality에 따라 이미지를 업데이트"""
+        # personality에 맞는 이미지 파일명 찾기
+        personality = name.user_personality
+        image_filename = self.PERSONALITY_IMAGE_MAP.get(personality, "test.png")
+        
+        # assets 폴더 경로
+        assets_dir = os.path.join(os.path.dirname(__file__), "assets")
+        image_path = os.path.join(assets_dir, image_filename)
+        
+        # 이미지 파일이 없으면 기본 이미지 사용
+        if not os.path.exists(image_path):
+            image_path = os.path.join(assets_dir, "test.png")
+        
+        # 이미지 로드
+        pixmap = QPixmap(image_path)
+        
+        # 크기를 1/12로 줄이기 (기존 1/10보다 작게)
         if not pixmap.isNull():
-            new_width = pixmap.width() // 10
-            new_height = pixmap.height() // 10
+            new_width = pixmap.width() // 12
+            new_height = pixmap.height() // 12
             # 0이 되면 안되므로 최소 1픽셀 보장
             new_width = max(1, new_width)
             new_height = max(1, new_height)
@@ -35,14 +72,8 @@ class FloatingWidget(QWidget):
                 Qt.AspectRatioMode.KeepAspectRatio, 
                 Qt.TransformationMode.SmoothTransformation
             )
-
+        
         self.char_label.setPixmap(pixmap)
-        
-        layout.addWidget(self.char_label)
-        self.setLayout(layout)
-        
-        # 드래그를 위한 초기 위치 변수
-        self.oldPos = None
 
     def mousePressEvent(self, event):
         """마우스 클릭 시 위치 저장 또는 우클릭 메뉴 표시"""

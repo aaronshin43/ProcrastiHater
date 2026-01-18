@@ -159,6 +159,8 @@ def main():
             
             # UI 상태 변경
             main_window.hide()
+            # personality에 맞는 이미지로 업데이트
+            floating_widget.update_image_from_personality()
             floating_widget.show()
             floating_widget.activateWindow()
             floating_widget.raise_()
@@ -189,6 +191,8 @@ def main():
 
             # UI 상태 변경
             main_window.hide()
+            # personality에 맞는 이미지로 업데이트
+            floating_widget.update_image_from_personality()
             floating_widget.show()
             
             # 플로팅 위젯에 포커스를 줘서 키 입력을 받을 수 있게 함

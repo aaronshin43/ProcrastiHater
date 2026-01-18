@@ -187,7 +187,7 @@ class PipBoyDetailPanel(QWidget):
             "Gigachad": "I have no enemies. No one has enemies.",
             "Anime Girl": "Onii-chan, wake up! The sun is already high in the sky.",
             "Drill Sergeant": "My grandmother can do push-ups better than that, and she's been dead for twenty years!",
-            "Gordon Ramsey": "My grandmother can do push-ups better than that, and she's been dead for twenty years!"  # 기본값 (Gordon Ramsey용 대사가 없으면)
+            "Gordon Ramsey": "it's a BLOODY DISASTER! The chicken is so raw, a skilled vet could still save it! GET OUT"
         }
         return voice_descriptions.get(voice_name, f"Details for {voice_name}")
     
@@ -334,7 +334,7 @@ class PipBoyDetailPanel(QWidget):
         """보이스 이름에 해당하는 오디오 파일 경로 반환"""
         # 보이스 이름 -> 파일명 매핑
         voice_file_mapping = {
-            "Gordon Ramsey": "voice_example.wav",  # 기본 파일 (Gordon Ramsey용 파일이 없으면)
+            "Gordon Ramsey": "Gordon_Ramsay.mp3",
             "Gigachad": "Giga_Chad.mp3",
             "Uncle Roger": "Uncle_Roger.mp3",
             "Anime Girl": "Anime_girl.mp3",
