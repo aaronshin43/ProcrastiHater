@@ -5,21 +5,20 @@ livekit-agents>=0.12.0
 # --- LiveKit Plugins (AI Models) ---
 # livekit-plugins-openai         # LLM (GPT-4o) & STT (Whisper) -> Replaced by Gemini
 google-genai
-livekit-plugins-elevenlabs     # TTS (목소리)
-livekit-plugins-silero         # VAD (말 끊김 감지)
+livekit-plugins-elevenlabs     # TTS (Voice)
+livekit-plugins-silero         # VAD (Voice Activity Detection)
 
 # --- Client App (GUI) ---
 PyQt6>=6.7.0
 
 # --- Vision & Sensing ---
-opencv-python                  # 웹캠 캡처
-mediapipe                      # 얼굴/눈 감지
-numpy                          # 이미지 연산
+opencv-python                  # Webcam capture
+mediapipe                      
+numpy                          
 
-# --- System & Utils ---
-# 윈도우 창 제목 가져오기 (윈도우에서만 설치됨)
+
 pywin32; sys_platform == 'win32'
-python-dotenv                  # .env 파일 로드
-colorlog                       # 로그 예쁘게 찍기
+python-dotenv                  
+colorlog                       # Pretty log formatting
 keyboard                       # global binding
 sounddevice                    # sound play

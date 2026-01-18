@@ -1,9 +1,14 @@
 # client/ui/floating_widget.py
-from PyQt6.QtWidgets import QWidget, QLabel, QVBoxLayout
+from PyQt6.QtWidgets import QWidget, QLabel, QVBoxLayout, QMenu
 from PyQt6.QtCore import Qt, pyqtSignal
-from PyQt6.QtGui import QPixmap
+from PyQt6.QtGui import QPixmap, QAction
 
 class FloatingWidget(QWidget):
+    # 우클릭 메뉴 액션 시그널
+    show_settings_signal = pyqtSignal()  # 캐릭터 설정
+    pause_signal = pyqtSignal()  # 일시정지
+    exit_signal = pyqtSignal()  # 종료
+    
     def __init__(self):
         super().__init__()
         # 배경 투명하게 설정 (핵심)
@@ -40,9 +45,11 @@ class FloatingWidget(QWidget):
         self.oldPos = None
 
     def mousePressEvent(self, event):
-        """마우스 클릭 시 위치 저장"""
+        """마우스 클릭 시 위치 저장 또는 우클릭 메뉴 표시"""
         if event.button() == Qt.MouseButton.LeftButton:
             self.oldPos = event.globalPosition().toPoint()
+        elif event.button() == Qt.MouseButton.RightButton:
+            self.mousePressRight(event)
 
     def mouseMoveEvent(self, event):
         """마우스 이동 시 창 이동"""
@@ -53,6 +60,31 @@ class FloatingWidget(QWidget):
 
     def mouseReleaseEvent(self, event):
         self.oldPos = None
+
+    def mousePressRight(self, event):
+        """우클릭 시 설정 메뉴 표시"""
+        menu = QMenu(self)
+        
+        # 캐릭터 설정 액션
+        settings_action = QAction("캐릭터 설정", self)
+        settings_action.triggered.connect(self.show_settings_signal.emit)
+        menu.addAction(settings_action)
+        
+        # 일시정지 액션
+        pause_action = QAction("일시정지", self)
+        pause_action.triggered.connect(self.pause_signal.emit)
+        menu.addAction(pause_action)
+        
+        # 구분선
+        menu.addSeparator()
+        
+        # 종료 액션
+        exit_action = QAction("종료", self)
+        exit_action.triggered.connect(self.exit_signal.emit)
+        menu.addAction(exit_action)
+        
+        # 메뉴를 마우스 위치에 표시
+        menu.exec(event.globalPosition().toPoint())
 
     def set_angry(self):
         # TODO: 화난 이미지로 변경하는 함수

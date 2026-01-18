@@ -161,6 +161,31 @@ def main():
     key_manager.toggle_session_signal.connect(toggle_session)
     key_manager.toggle_debug_signal.connect(toggle_debug_window)
     key_manager.toggle_pause_signal.connect(toggle_pause)
+    
+    # MainWindow의 toggle_session_signal 연결 (Personality 화면에서 next 버튼 클릭 시)
+    main_window.toggle_session_signal.connect(toggle_session)
+    
+    # FloatingWidget 우클릭 메뉴 시그널 연결
+    def show_settings():
+        """캐릭터 설정 창 표시"""
+        main_window.show()
+        main_window.activateWindow()
+        main_window.raise_()
+        print("   - Show Settings Window")
+    
+    def exit_application():
+        """애플리케이션 종료"""
+        print("🛑 Exit requested from Floating Widget menu")
+        # 세션이 실행 중이면 종료
+        if vision_worker.isRunning():
+            vision_worker.stop()
+            livekit_client.disconnect()
+        # 앱 종료
+        app.quit()
+    
+    floating_widget.show_settings_signal.connect(show_settings)
+    floating_widget.pause_signal.connect(toggle_pause)
+    floating_widget.exit_signal.connect(exit_application)
 
     # Legacy Local Connections (Optional: Keep default A/B in local windoes if desired, 
     # but user requested change to Alt+A/B globally, so we rely on key_manager priority)

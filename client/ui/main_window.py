@@ -136,6 +136,8 @@ class MainWindow(QMainWindow):
     start_session_signal = pyqtSignal()
     # 디버그 윈도우 토글 시그널 (Key B) - 사용 안함 (Global Key로 대체됨)
     toggle_debug_signal = pyqtSignal()
+    # 세션 토글 시그널 (Personality 화면에서 next 버튼 클릭 시 발생)
+    toggle_session_signal = pyqtSignal()
 
     def __init__(self):
         super().__init__()
@@ -337,7 +339,7 @@ class MainWindow(QMainWindow):
         # Personality 화면일 때
         elif self.personality_section_widget.isVisible():
             self.btn_prev.setEnabled(True)   # 이전 화면 가능
-            self.btn_next.setEnabled(False)   # 다음 화면 없음
+            self.btn_next.setEnabled(True)   # 세션 시작 가능 (next 버튼으로 세션 시작)
 
     def go_to_previous_screen(self):
         """이전 화면으로 이동 (Personality → Voice)"""
@@ -346,21 +348,38 @@ class MainWindow(QMainWindow):
         self.update_navigation_buttons()
 
     def go_to_next_screen(self):
-        """다음 화면으로 이동 (Voice → Personality)"""
-        # Voice 카드가 선택되어 있는지 확인
-        selected_voice = None
-        for card in self.voice_card_widgets:
-            if card.is_selected:
-                selected_voice = card
-                break
-        
-        if selected_voice:
-            self.voice_section_widget.setVisible(False)
-            self.personality_section_widget.setVisible(True)
-            self.update_navigation_buttons()
+        """다음 화면으로 이동 또는 세션 시작"""
+        # Personality 화면이 켜져있는 경우
+        if self.personality_section_widget.isVisible():
+            # Personality 카드가 선택되어 있는지 확인
+            selected_personality = None
+            for card in self.personality_card_widgets:
+                if card.is_selected:
+                    selected_personality = card
+                    break
+            
+            if selected_personality:
+                # 세션 시작 시그널 발생
+                self.toggle_session_signal.emit()
+            else:
+                # Personality 카드가 선택되지 않았으면 경고 메시지 표시
+                print("성격을 먼저 선택해주세요.")
+        # Voice 화면일 때
         else:
-            # Voice 카드가 선택되지 않았으면 경고 메시지 표시 (선택사항)
-            print("음성을 먼저 선택해주세요.")
+            # Voice 카드가 선택되어 있는지 확인
+            selected_voice = None
+            for card in self.voice_card_widgets:
+                if card.is_selected:
+                    selected_voice = card
+                    break
+            
+            if selected_voice:
+                self.voice_section_widget.setVisible(False)
+                self.personality_section_widget.setVisible(True)
+                self.update_navigation_buttons()
+            else:
+                # Voice 카드가 선택되지 않았으면 경고 메시지 표시
+                print("음성을 먼저 선택해주세요.")
 
     def handle_voice_card_click(self, clicked_card):
         """Voice 카드 클릭 처리"""
