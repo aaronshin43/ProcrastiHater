@@ -9,6 +9,10 @@ Procrasti-Hater is an AI-powered surveillance agent that forces you to be produc
 ![PyQt6](https://img.shields.io/badge/UI-PyQt6-green)
 ![OpenAI](https://img.shields.io/badge/AI-OpenAI%20%2F%20ElevenLabs-purple)
 
+## 🎥 Demo
+
+[![Procrasti-Hater Demo](https://img.youtube.com/vi/FnCJTs_QiDU/0.jpg)](https://www.youtube.com/watch?v=FnCJTs_QiDU)
+
 ## 🔥 Key Features
 
 -   **👀 Real-time Vision Monitoring**: Detects if you are sleeping, looking at your phone, absent, or looking away (gazing elsewhere) using MediaPipe.
